@@ -296,16 +296,63 @@
   <script>
     let scanner;
 
-    function onScanSuccess(decodedText) {
-      document.getElementById("result").textContent =
-        "QR terbaca: " + decodedText;
+    let lastDecoded = "";
+    let lastDecodedAt = 0;
 
-      // =====================================================
-      // MASUKKAN PROSES SETELAH QR TERBACA DI SINI.
-      // Contoh:
-      // window.location.href = decodedText;
-      // =====================================================
+    function onScanSuccess(decodedText) {
+      const now = Date.now();
+      const value = String(decodedText || "").trim();
+
+      // Hindari pengiriman QR yang sama berulang-ulang.
+      if (!value || (value === lastDecoded && now - lastDecodedAt < 2500)) return;
+      lastDecoded = value;
+      lastDecodedAt = now;
+
+      document.getElementById("result").textContent =
+        "QR terbaca: " + value;
+      document.getElementById("cameraStatus").textContent =
+        "QR terbaca — mengirim ke Daftar Hadir...";
+
+      // Kirim hasil scan ke halaman E-Absensi yang membuka popup ini.
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({
+            type: "DH_QR_SCAN_RESULT",
+            nisn: value,
+            ts: Date.now()
+          }, "*");
+
+          document.getElementById("cameraStatus").textContent =
+            "QR terkirim ke Daftar Hadir";
+        } else {
+          document.getElementById("cameraStatus").textContent =
+            "Scanner tidak terhubung ke Daftar Hadir";
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById("cameraStatus").textContent =
+          "Gagal mengirim QR ke Daftar Hadir";
+      }
     }
+
+    // Menerima balasan dari aplikasi E-Absensi.
+    window.addEventListener("message", function(event) {
+      if (!event.data) return;
+
+      if (event.data.type === "DH_SCAN_SUCCESS") {
+        document.getElementById("result").textContent =
+          "✓ " + (event.data.nama || "Absensi berhasil");
+        document.getElementById("cameraStatus").textContent =
+          "Absensi berhasil";
+      }
+
+      if (event.data.type === "DH_SCAN_ERROR") {
+        document.getElementById("result").textContent =
+          "⚠ " + (event.data.message || "QR tidak dikenali");
+        document.getElementById("cameraStatus").textContent =
+          "QR tidak ditemukan di daftar siswa";
+      }
+    });
 
     function onScanFailure(error) {
       // Sengaja dikosongkan.
@@ -317,7 +364,7 @@
         scanner = new Html5Qrcode("reader");
 
         await scanner.start(
-          { facingMode: "environment" },
+          { facingMode: { ideal: "environment" } },
           {
             fps: 10,
             qrbox: function(viewfinderWidth, viewfinderHeight) {
